@@ -1,6 +1,14 @@
-// Serial-NeoPixel-Control.ino
-// Chase Sawyer, February 2017
-// Uses the FastLED 3.1.3 library for LED control.
+/* Serial-NeoPixel-Control.ino
+ * Chase Sawyer, February 2017
+ * Uses the FastLED 3.1.3 library for LED control.
+ *
+ * BUGGY: Beyond about 15 neopixels, this control doesn't behave as expected.
+ *  - Possibly could be that some data is getting lost in transit
+ *  - or data isn't loading into the buffer correctly
+ *  - or the transmission over the one wire data line isn't behaving properly
+ */
+
+
 
 
 #include "FastLED.h"
