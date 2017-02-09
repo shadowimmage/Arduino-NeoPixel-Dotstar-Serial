@@ -366,7 +366,6 @@ enum  commands {
 CmdMessenger cmdMessenger = CmdMessenger(Serial);
 
 // Attach handler functions to recognized commands
-// UNCOMMENT THESE AS THEY'RE IMPLEMENTED
 void attachCommandCallbacks() {
 	cmdMessenger.attach(CMDunknownCommand); // default on unrecognized
 	cmdMessenger.attach(SETCOLORALL, CMDsetColorAll);
