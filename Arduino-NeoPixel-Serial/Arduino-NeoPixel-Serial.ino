@@ -1,6 +1,6 @@
 /* Serial-NeoPixel-Control.ino
  * Chase Sawyer, February 2017
- * Uses the FastLED 3.1.3 library for LED control.
+ * Uses Adafruit's Neopixel librar
  *
  * BUGGY: Beyond about 15 neopixels, this control doesn't behave as expected.
  *  - Possibly could be that some data is getting lost in transit

@@ -10,6 +10,7 @@
  * 
  */
 
+#include <CmdMessenger.h>
 #include <Adafruit_NeoPixel.h>
 #ifdef __AVR__
   #include <avr/power.h>
@@ -19,7 +20,15 @@
 #define NUM_LEDS 60
 
 // Pattern types supported:
-enum  pattern { NONE, RAINBOW_CYCLE, THEATER_CHASE, COLOR_WIPE, SCANNER, FADE };
+enum  pattern { 
+	NONE, 
+	RAINBOW_CYCLE, 
+	THEATER_CHASE, 
+	COLOR_WIPE, 
+	SCANNER, 
+	FADE, 
+	BLINK 
+};
 // Patern directions supported:
 enum  direction { FORWARD, REVERSE };
 
@@ -252,6 +261,11 @@ class NeoPatterns : public Adafruit_NeoPixel
         show();
         Increment();
     }
+
+    // Update the Interval for any running pattern.
+    void UpdateInterval(uint32_t interval) {
+    	Interval = interval;
+    }
    
     // Calculate 50% dimmed version of a color (used by ScannerUpdate)
     uint32_t DimColor(uint32_t color)
@@ -269,6 +283,20 @@ class NeoPatterns : public Adafruit_NeoPixel
             setPixelColor(i, color);
         }
         show();
+    }
+
+    // Set a single pixel to a color
+    void ColorSet(uint32_t color, uint16_t index) {
+    	setPixelColor(index, color);
+    	show();
+    }
+
+    // Set a range from stIndex to num pixels to a color
+    void ColorSet(uint32_t color, uint16_t stIndex, uint16_t num) {
+    	for (int i = stIndex; i < num; i++) {
+    		setPixelColor(i, color);
+    	}
+    	show();
     }
 
     // Returns the Red component of a 32-bit color
@@ -310,6 +338,7 @@ class NeoPatterns : public Adafruit_NeoPixel
         }
     }
 };
+
 //Only using one strip of LEDs
 // void Ring1Complete();
 // void Ring2Complete();
@@ -323,22 +352,256 @@ void StripComplete();
 // NeoPatterns Stick(16, 7, NEO_GRB + NEO_KHZ800, &StickComplete);
 NeoPatterns Strip(NUM_LEDS, DATA_PIN, NEO_GRB + NEO_KHZ800, &StripComplete);
 
+// Commands recognized
+enum  commands {
+	CMDERROR,
+	SETCOLORALL,
+	SETCOLORSINGLE,
+	SETCOLORRANGE,
+	SETPATTERN,
+	SETBRIGHTNESSALL
+};
+
+// Attach a new CmdMessenger object to the  default Serial port
+CmdMessenger cmdMessenger = CmdMessenger(Serial);
+
+// Attach handler functions to recognized commands
+// UNCOMMENT THESE AS THEY'RE IMPLEMENTED
+void attachCommandCallbacks() {
+	cmdMessenger.attach(CMDunknownCommand); // default on unrecognized
+	cmdMessenger.attach(SETCOLORALL, CMDsetColorAll);
+	cmdMessenger.attach(SETCOLORSINGLE, CMDsetColorSingle);
+	cmdMessenger.attach(SETCOLORRANGE, CMDsetColorRange);
+	cmdMessenger.attach(SETPATTERN, CMDsetPattern);
+	cmdMessenger.attach(SETBRIGHTNESSALL, CMDsetBrightnessAll);
+}
+
+// called on any command received that doesn't match above handlers.
+void CMDunknownCommand() {
+	cmdMessenger.sendCmd(CMDERROR, F("Command unknown / no attached callback."));
+}
+
+// sets all the colors on the strip to a defined color passed in the command argument
+// Expected command would be in the form: "1,0xffeedd"
+// cmdMessenger param1: color
+void CMDsetColorAll() {
+	if (cmdMessenger.available()) {
+		Strip.ColorSet(cmdMessenger.readInt32Arg());
+	} else {
+		cmdMessenger.sendCmd(CMDERROR, F("Missing color parameter."));
+	}
+}
+
+// sets a single LED to designated color
+// Expected command would be in the form: "2,2,0xffeedd"
+// cmdMessenger param1 LED index
+// cmdMessenger param2 Color
+void CMDsetColorSingle() {
+	uint16_t led;
+	uint32_t color;
+	boolean ok = false;
+	if (cmdMessenger.available()) {
+		led = cmdMessenger.readInt16Arg();
+		if (cmdMessenger.available()) {
+			color = cmdMessenger.readInt32Arg();
+			ok = true;
+		}
+	}
+	if (ok) {
+		Strip.ColorSet(color, led);
+	} else {
+		cmdMessenger.sendCmd(CMDERROR, F("Missing single color set parameter(s)."));
+	}
+}
+
+// sets a range of LEDs to designated color
+// Expected command would be in the form: "2,0,10,0xffeedd"
+// cmdMessenger param1 starting LED index
+// cmdMessenger param2 Number of LEDs to color
+// cmdMessenger param3 Color
+void CMDsetColorRange() {
+	uint16_t startLED;
+	uint16_t num;
+	uint32_t color;
+	boolean ok = false;
+	if (cmdMessenger.available()) {
+		startLED = cmdMessenger.readInt16Arg();
+		if (cmdMessenger.available()) {
+			num = cmdMessenger.readInt16Arg();
+			if (cmdMessenger.available()) {
+				color = cmdMessenger.readInt32Arg();
+				ok = true;
+			}
+		}
+	}
+	if (ok) {
+		Strip.ColorSet(color, startLED, num);
+	} else {
+		cmdMessenger.sendCmd(CMDERROR, F("Missing color range parameter(s)."));
+	}
+}
+
+// Set the LEDs to a certain pre-defined pattern (from the NeoPatterns class)
+// Expected command would be in the form: "4,2"
+// cmdMessenger param1: pattern index as defined by enum pattern {}
+// cmdMessenger param2+: varaibles for the Pattern to execute
+// Basic format:
+// 		if the pattern matches, go to that pattern # and 
+// 		Check through for the needed additional parameters
+// 		If all the parameters are present (and thus set to local variables) 
+// 		Then pass those along to the pattern function,
+// 		otherwise send an error back to the computer.
+void CMDsetPattern() {
+	uint16_t pattern;
+	if (cmdMessenger.available()) {
+		pattern = cmdMessenger.readInt16Arg();
+		switch(pattern) {
+			case RAINBOW_CYCLE: {
+				uint8_t interval;
+				boolean ok = false;
+				if (cmdMessenger.available()) {
+					interval = cmdMessenger.readInt16Arg();
+					ok = true;
+				}
+				if (ok) {
+					Strip.RainbowCycle(interval);
+				} else {
+					cmdMessenger.sendCmd(CMDERROR, F("Insufficient Params - Rainbow Cycle needs 1."));
+				}
+			}
+				break;
+			case THEATER_CHASE: {
+				uint32_t color1;
+				uint32_t color2;
+				uint8_t interval;
+				boolean ok = false;
+				if (cmdMessenger.available()) {
+					color1 = cmdMessenger.readInt32Arg();
+					if (cmdMessenger.available()) {
+						color2 = cmdMessenger.readInt32Arg();
+						if (cmdMessenger.available()) {
+							interval = cmdMessenger.readInt16Arg();
+							ok = true;
+						}
+					}
+				}
+				if (ok) {
+					Strip.TheaterChase(color1, color2, interval);
+				} else {
+					cmdMessenger.sendCmd(CMDERROR, F("Insufficient Params - Theater Chase needs 3."));
+				}
+			}
+				break;
+			case COLOR_WIPE: {
+				uint32_t color;
+				uint8_t interval;
+				boolean ok = false;
+				if (cmdMessenger.available()) {
+					color = cmdMessenger.readInt32Arg();
+					if (cmdMessenger.available()) {
+						interval = cmdMessenger.readInt16Arg();
+						ok = true;
+					}
+				}
+				if (ok) {
+					Strip.ColorWipe(color, interval);
+				} else {
+					cmdMessenger.sendCmd(CMDERROR, F("Insufficient Params - Color Wipe needs 2."));
+				}
+			}
+				break;
+			case SCANNER: {
+				uint32_t color;
+				uint8_t interval;
+				boolean ok = false;
+				if (cmdMessenger.available()) {
+					color = cmdMessenger.readInt32Arg();
+					if (cmdMessenger.available()) {
+						interval = cmdMessenger.readInt16Arg();
+						ok = true;
+					}
+				}
+				if (ok) {
+					Strip.Scanner(color, interval);
+				} else {
+					cmdMessenger.sendCmd(CMDERROR, F("Insufficient Params - Scanner needs 2."));
+				}
+			}
+				break;
+			case FADE: {
+				uint32_t color1;
+				uint32_t color2;
+				uint16_t steps;
+				uint8_t interval;
+				boolean ok = false;
+				if (cmdMessenger.available()) {
+					color1 = cmdMessenger.readInt32Arg();
+					if (cmdMessenger.available()) {
+						color2 = cmdMessenger.readInt32Arg();
+						if (cmdMessenger.available()) {
+							steps = cmdMessenger.readInt16Arg();
+							if (cmdMessenger.available()) {
+								interval = cmdMessenger.readInt16Arg();
+								ok = true;
+							}
+						}
+					}
+				}
+				if (ok) {
+					Strip.Fade(color1, color2, steps, interval);
+				} else {
+					cmdMessenger.sendCmd(CMDERROR, F("Insufficient Params - Fade needs 4."));
+				}
+			}
+				break;
+			default:
+				cmdMessenger.sendCmd(CMDERROR, F("No matching pattern index."));
+				break;
+		}
+	} else {
+		cmdMessenger.sendCmd(CMDERROR, F("Missing pattern parameter."));
+	}
+}
+
+// Use internal NeoPixel library brightness function to globally set a max brightness
+// for the whole instance. Note: slow - shouldn't be called often.
+// Expected command would be in the form: "5,64"
+// cmdMessenger param1: brightness level
+void CMDsetBrightnessAll() {
+	uint8_t brightness;
+	boolean ok = false;
+	if (cmdMessenger.available()) {
+		brightness = cmdMessenger.readInt16Arg();
+		ok = true;
+	}
+	if (ok) {
+		Strip.setBrightness(brightness);
+	} else {
+		cmdMessenger.sendCmd(CMDERROR, F("Brightness needs 1 param."));
+	}
+}
+
 // Initialize everything and prepare to start
-void setup()
-{
+void setup() {
 	Serial.begin(115200);
+	Strip.begin();
 
     // Kick off a pattern
     // Ring1.TheaterChase(Ring1.Color(255,255,0), Ring1.Color(0,0,50), 100);
     // Ring2.RainbowCycle(3);
     // Ring2.Color1 = Ring1.Color1;
     // Stick.Scanner(Ring1.Color(255,0,0), 55);
+
+    attachCommandCallbacks();
+
     Strip.RainbowCycle(3);
 }
 
 // Main loop
-void loop()
-{
+void loop() {
+	// Process incomming serial data, and perform callbacks
+	cmdMessenger.feedinSerialData();
+
     // Update the LEDs.
     // Ring1.Update();
     // Ring2.Update();
