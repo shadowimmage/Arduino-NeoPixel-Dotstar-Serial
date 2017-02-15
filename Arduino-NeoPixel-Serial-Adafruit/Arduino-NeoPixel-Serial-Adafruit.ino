@@ -44,7 +44,7 @@ class NeoPatterns : public Adafruit_NeoPixel
     pattern  ActivePattern;  // which pattern is running
     direction Direction;     // direction to run the pattern
     
-    unsigned long Interval;   // milliseconds between updates
+    uint32_t Interval;   // milliseconds between updates
     unsigned long lastUpdate; // last update of position
     
     uint32_t Color1, Color2;  // What colors are in use
@@ -141,7 +141,7 @@ class NeoPatterns : public Adafruit_NeoPixel
 
     // display a static pattern, and calls the OnComplete handler.
     // Interval controls how often this gets checked
-    void StaticPattern(uint8_t interval) {
+    void StaticPattern(uint32_t interval) {
     	ActivePattern = STATIC;
     	Interval = interval;
         TotalSteps = 1;
@@ -155,7 +155,7 @@ class NeoPatterns : public Adafruit_NeoPixel
     }
     
     // Initialize for a RainbowCycle
-    void RainbowCycle(uint8_t interval, direction dir = FORWARD)
+    void RainbowCycle(uint32_t interval, direction dir = FORWARD)
     {
         ActivePattern = RAINBOW_CYCLE;
         Interval = interval;
@@ -176,7 +176,7 @@ class NeoPatterns : public Adafruit_NeoPixel
     }
 
     // Initialize for a Theater Chase
-    void TheaterChase(uint32_t color1, uint32_t color2, uint8_t interval, direction dir = FORWARD)
+    void TheaterChase(uint32_t color1, uint32_t color2, uint32_t interval, direction dir = FORWARD)
     {
         ActivePattern = THEATER_CHASE;
         Interval = interval;
@@ -206,7 +206,7 @@ class NeoPatterns : public Adafruit_NeoPixel
     }
 
     // Initialize for a ColorWipe
-    void ColorWipe(uint32_t color, uint8_t interval, direction dir = FORWARD)
+    void ColorWipe(uint32_t color, uint32_t interval, direction dir = FORWARD)
     {
         ActivePattern = COLOR_WIPE;
         Interval = interval;
@@ -225,7 +225,7 @@ class NeoPatterns : public Adafruit_NeoPixel
     }
     
     // Initialize for a SCANNNER
-    void Scanner(uint32_t color1, uint8_t interval)
+    void Scanner(uint32_t color1, uint32_t interval)
     {
         ActivePattern = SCANNER;
         Interval = interval;
@@ -257,7 +257,7 @@ class NeoPatterns : public Adafruit_NeoPixel
     }
     
     // Initialize for a Fade
-    void Fade(uint32_t color1, uint32_t color2, uint16_t steps, uint8_t interval, direction dir = FORWARD)
+    void Fade(uint32_t color1, uint32_t color2, uint16_t steps, uint32_t interval, direction dir = FORWARD)
     {
         ActivePattern = FADE;
         Interval = interval;
@@ -417,13 +417,14 @@ void CMDunknownCommand() {
 // cmdMessenger param1: color
 void CMDsetColorAll() {
     uint32_t color = cmdMessenger.readBinArg<uint32_t>();
+    uint32_t interval = cmdMessenger.readBinArg<uint32_t>();
     while (cmdMessenger.available()) {
     	cmdMessenger.readBinArg<byte>();
     }
-    if (color != NULL) {
+    if (color != NULL && interval != NULL) {
         Strip.ColorSet(color);
-        Strip.StaticPattern(50);
-        cmdMessenger.sendBinCmd(CMDERROR, color);
+        Strip.StaticPattern(10);
+        cmdMessenger.sendBinCmd(CMDERROR, color, interval);
         Serial.flush();
     } else {
         cmdMessenger.sendCmd(CMDERROR, F("Missing color parameter."));
@@ -697,6 +698,7 @@ void loop() {
 	// Process incomming serial data, and perform callbacks
     if (UNBLOCKED) {
     	Strip.Update();
+    	cmdMessenger.sendBinCmd(ARDUINOBUSY,true);
     } else {
     	cmdMessenger.feedinSerialData();
     }
@@ -704,7 +706,9 @@ void loop() {
 
 // Strip Completion Callback
 void StripComplete() {
+	UNBLOCKED = false; // block the update method - waiting for host reply.
 	cmdMessenger.sendBinCmd(ARDUINOBUSY,false);
 	Serial.flush();
-	UNBLOCKED = false; // block the update method - waiting for host reply.
+	delay(5);
+	//todo: set time out on this and restore functionality for a time.
 }
