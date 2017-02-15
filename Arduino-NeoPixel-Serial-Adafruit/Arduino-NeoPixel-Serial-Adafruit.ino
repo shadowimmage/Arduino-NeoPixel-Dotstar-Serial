@@ -18,19 +18,22 @@
 
 #define DATA_PIN 6
 #define NUM_LEDS 60
+#define BAUD_RATE 115200
 
 // Pattern types supported:
-enum  pattern { 
+enum  pattern {
 	NONE, 
-	RAINBOW_CYCLE, 
-	THEATER_CHASE, 
+	RAINBOW_CYCLE,
+	THEATER_CHASE,
 	COLOR_WIPE, 
 	SCANNER, 
-	FADE, 
-	BLINK 
+	FADE,
+    STATIC
 };
 // Patern directions supported:
 enum  direction { FORWARD, REVERSE };
+
+boolean UNBLOCKED = true;
 
 // NeoPattern Class - derived from the Adafruit_NeoPixel class
 class NeoPatterns : public Adafruit_NeoPixel
@@ -84,6 +87,8 @@ class NeoPatterns : public Adafruit_NeoPixel
                 case FADE:
                     FadeUpdate();
                     break;
+                case STATIC:
+                    StaticPatternUpdate();
                 default:
                     break;
             }
@@ -132,6 +137,21 @@ class NeoPatterns : public Adafruit_NeoPixel
             Direction = FORWARD;
             Index = 0;
         }
+    }
+
+    // display a static pattern, and calls the OnComplete handler.
+    // Interval controls how often this gets checked
+    void StaticPattern(uint8_t interval) {
+    	ActivePattern = STATIC;
+    	Interval = interval;
+        TotalSteps = 1;
+        Index = 0;
+    	show();
+    }
+
+    // doesn't do much; increments for the callback function to eventually execute.
+    void StaticPatternUpdate() {
+        Increment();
     }
     
     // Initialize for a RainbowCycle
@@ -358,21 +378,33 @@ enum  commands {
 	SETCOLORALL,
 	SETCOLORSINGLE,
 	SETCOLORRANGE,
-	SETPATTERN,
-	SETBRIGHTNESSALL
+	SETPATTERNRAINBOW,
+	SETPATTERNTHEATER,
+	SETPATTERNWIPE,
+	SETPATTERNSCANNER,
+	SETPATTERNFADE,
+	SETBRIGHTNESSALL,
+	ARDUINOBUSY,
+	NOCOMMAND
 };
 
 // Attach a new CmdMessenger object to the  default Serial port
-CmdMessenger cmdMessenger = CmdMessenger(Serial);
+CmdMessenger cmdMessenger = CmdMessenger(Serial,',',';','/');
 
 // Attach handler functions to recognized commands
 void attachCommandCallbacks() {
-	cmdMessenger.attach(CMDunknownCommand); // default on unrecognized
 	cmdMessenger.attach(SETCOLORALL, CMDsetColorAll);
 	cmdMessenger.attach(SETCOLORSINGLE, CMDsetColorSingle);
 	cmdMessenger.attach(SETCOLORRANGE, CMDsetColorRange);
-	cmdMessenger.attach(SETPATTERN, CMDsetPattern);
+    cmdMessenger.attach(SETPATTERNRAINBOW, CMDsetPatternRainbow);
+    cmdMessenger.attach(SETPATTERNTHEATER, CMDsetPatternTheater);
+    cmdMessenger.attach(SETPATTERNWIPE, CMDsetPatternWipe);
+    cmdMessenger.attach(SETPATTERNSCANNER, CMDsetPatternScanner);
+	cmdMessenger.attach(SETPATTERNFADE, CMDsetPatternFade);
 	cmdMessenger.attach(SETBRIGHTNESSALL, CMDsetBrightnessAll);
+	cmdMessenger.attach(ARDUINOBUSY, CMDarduinoBusy);
+	cmdMessenger.attach(NOCOMMAND, CMDnoCommand);
+    cmdMessenger.attach(CMDunknownCommand); // default on unrecognized
 }
 
 // called on any command received that doesn't match above handlers.
@@ -384,21 +416,45 @@ void CMDunknownCommand() {
 // Expected command would be in the form: "1,0xffeedd"
 // cmdMessenger param1: color
 void CMDsetColorAll() {
-	if (cmdMessenger.available()) {
-		Strip.ColorSet(cmdMessenger.readInt32Arg());
-	} else {
-		cmdMessenger.sendCmd(CMDERROR, F("Missing color parameter."));
-	}
+    uint32_t color = cmdMessenger.readBinArg<uint32_t>();
+    while (cmdMessenger.available()) {
+    	cmdMessenger.readBinArg<byte>();
+    }
+    if (color != NULL) {
+        Strip.ColorSet(color);
+        Strip.StaticPattern(50);
+        cmdMessenger.sendBinCmd(CMDERROR, color);
+        Serial.flush();
+    } else {
+        cmdMessenger.sendCmd(CMDERROR, F("Missing color parameter."));
+    }
+    UNBLOCKED = true;
 }
+// void CMDsetColorAll() {
+//     uint32_t color = cmdMessenger.readBinArg<uint32_t>();
+//     while (cmdMessenger.available()) {
+//     	cmdMessenger.readBinArg<byte>();
+//     }
+//     // if (color != NULL) {
+//     //     Strip.ActivePattern = STATIC;
+//     //     Strip.ColorSet(color);
+//     cmdMessenger.sendBinCmd(CMDERROR, color);
+//     Serial.flush();
+//     // } else {
+//     //     cmdMessenger.sendCmd(CMDERROR, F("Missing color parameter."));
+//     //     Serial.flush();
+//     // }
+//     UNBLOCKED = true;
+// }
 
 // sets a single LED to designated color
 // Expected command would be in the form: "2,2,0xffeedd"
 // cmdMessenger param1 LED index
 // cmdMessenger param2 Color
 void CMDsetColorSingle() {
+    boolean ok = false;
 	uint16_t led;
 	uint32_t color;
-	boolean ok = false;
 	if (cmdMessenger.available()) {
 		led = cmdMessenger.readInt16Arg();
 		if (cmdMessenger.available()) {
@@ -407,7 +463,9 @@ void CMDsetColorSingle() {
 		}
 	}
 	if (ok) {
+        Strip.ActivePattern = STATIC;
 		Strip.ColorSet(color, led);
+        cmdMessenger.sendCmd(CMDERROR, F("Color Set Single OK."));
 	} else {
 		cmdMessenger.sendCmd(CMDERROR, F("Missing single color set parameter(s)."));
 	}
@@ -419,10 +477,10 @@ void CMDsetColorSingle() {
 // cmdMessenger param2 Number of LEDs to color
 // cmdMessenger param3 Color
 void CMDsetColorRange() {
+    boolean ok = false;
 	uint16_t startLED;
 	uint16_t num;
 	uint32_t color;
-	boolean ok = false;
 	if (cmdMessenger.available()) {
 		startLED = cmdMessenger.readInt16Arg();
 		if (cmdMessenger.available()) {
@@ -434,132 +492,159 @@ void CMDsetColorRange() {
 		}
 	}
 	if (ok) {
+        Strip.ActivePattern = STATIC;
 		Strip.ColorSet(color, startLED, num);
+        cmdMessenger.sendCmd(CMDERROR, F("Color Set Range OK."));
 	} else {
 		cmdMessenger.sendCmd(CMDERROR, F("Missing color range parameter(s)."));
 	}
 }
 
-// Set the LEDs to a certain pre-defined pattern (from the NeoPatterns class)
-// Expected command would be in the form: "4,2"
-// cmdMessenger param1: pattern index as defined by enum pattern {}
-// cmdMessenger param2+: varaibles for the Pattern to execute
-// Basic format:
-// 		if the pattern matches, go to that pattern # and 
-// 		Check through for the needed additional parameters
-// 		If all the parameters are present (and thus set to local variables) 
-// 		Then pass those along to the pattern function,
-// 		otherwise send an error back to the computer.
-void CMDsetPattern() {
-	uint16_t pattern;
-	if (cmdMessenger.available()) {
-		pattern = cmdMessenger.readInt16Arg();
-		switch(pattern) {
-			case RAINBOW_CYCLE: {
-				uint8_t interval;
-				boolean ok = false;
-				if (cmdMessenger.available()) {
-					interval = cmdMessenger.readInt16Arg();
-					ok = true;
-				}
-				if (ok) {
-					Strip.RainbowCycle(interval);
-				} else {
-					cmdMessenger.sendCmd(CMDERROR, F("Insufficient Params - Rainbow Cycle needs 1."));
-				}
-			}
-				break;
-			case THEATER_CHASE: {
-				uint32_t color1;
-				uint32_t color2;
-				uint8_t interval;
-				boolean ok = false;
-				if (cmdMessenger.available()) {
-					color1 = cmdMessenger.readInt32Arg();
-					if (cmdMessenger.available()) {
-						color2 = cmdMessenger.readInt32Arg();
-						if (cmdMessenger.available()) {
-							interval = cmdMessenger.readInt16Arg();
-							ok = true;
-						}
-					}
-				}
-				if (ok) {
-					Strip.TheaterChase(color1, color2, interval);
-				} else {
-					cmdMessenger.sendCmd(CMDERROR, F("Insufficient Params - Theater Chase needs 3."));
-				}
-			}
-				break;
-			case COLOR_WIPE: {
-				uint32_t color;
-				uint8_t interval;
-				boolean ok = false;
-				if (cmdMessenger.available()) {
-					color = cmdMessenger.readInt32Arg();
-					if (cmdMessenger.available()) {
-						interval = cmdMessenger.readInt16Arg();
-						ok = true;
-					}
-				}
-				if (ok) {
-					Strip.ColorWipe(color, interval);
-				} else {
-					cmdMessenger.sendCmd(CMDERROR, F("Insufficient Params - Color Wipe needs 2."));
-				}
-			}
-				break;
-			case SCANNER: {
-				uint32_t color;
-				uint8_t interval;
-				boolean ok = false;
-				if (cmdMessenger.available()) {
-					color = cmdMessenger.readInt32Arg();
-					if (cmdMessenger.available()) {
-						interval = cmdMessenger.readInt16Arg();
-						ok = true;
-					}
-				}
-				if (ok) {
-					Strip.Scanner(color, interval);
-				} else {
-					cmdMessenger.sendCmd(CMDERROR, F("Insufficient Params - Scanner needs 2."));
-				}
-			}
-				break;
-			case FADE: {
-				uint32_t color1;
-				uint32_t color2;
-				uint16_t steps;
-				uint8_t interval;
-				boolean ok = false;
-				if (cmdMessenger.available()) {
-					color1 = cmdMessenger.readInt32Arg();
-					if (cmdMessenger.available()) {
-						color2 = cmdMessenger.readInt32Arg();
-						if (cmdMessenger.available()) {
-							steps = cmdMessenger.readInt16Arg();
-							if (cmdMessenger.available()) {
-								interval = cmdMessenger.readInt16Arg();
-								ok = true;
-							}
-						}
-					}
-				}
-				if (ok) {
-					Strip.Fade(color1, color2, steps, interval);
-				} else {
-					cmdMessenger.sendCmd(CMDERROR, F("Insufficient Params - Fade needs 4."));
-				}
-			}
-				break;
-			default:
-				cmdMessenger.sendCmd(CMDERROR, F("No matching pattern index."));
-				break;
-		}
-	} else {
-		cmdMessenger.sendCmd(CMDERROR, F("Missing pattern parameter."));
-	}
+// Set the LEDs to the Rainbow Pattern
+// Expected Command would be in the form: "4,2"
+// cmdMessenger param1: interval for the rainbow cycle.
+void CMDsetPatternRainbow() {
+    uint32_t interval = cmdMessenger.readBinArg<uint32_t>();
+    while (cmdMessenger.available()) {
+    	cmdMessenger.readBinArg<byte>();
+    }
+    if (interval != NULL) {
+        Strip.RainbowCycle(interval);
+        // cmdMessenger.sendCmd(CMDERROR, F("Rainbow Cycle Pattern OK."));
+        cmdMessenger.sendBinCmd(CMDERROR,interval);
+        Serial.flush();
+    } else {
+        cmdMessenger.sendCmd(CMDERROR, F("Insufficient Params - Rainbow Cycle needs 1."));
+        Serial.flush();
+    }
+    UNBLOCKED = true;
+}
+// void CMDsetPatternRainbow() {
+//     // boolean ok = false;
+//     uint32_t interval = cmdMessenger.readBinArg<uint32_t>();
+//     while (cmdMessenger.available()) {
+//     	cmdMessenger.readBinArg<byte>();
+//     }
+//     cmdMessenger.sendBinCmd(CMDERROR, interval);
+    
+//     // if (interval != NULL) {
+//     //     ok = true;
+//     // }
+//     // if (ok) {
+//     //     Strip.RainbowCycle(interval);
+//     //     cmdMessenger.sendCmd(CMDERROR, F("Rainbow Cycle Pattern OK."));
+//         Serial.flush();
+//     // } else {
+//     //     cmdMessenger.sendCmd(CMDERROR, F("Insufficient Params - Rainbow Cycle needs 1."));
+//     //     Serial.flush();
+//     // }
+//     UNBLOCKED = true;
+// }
+
+// Set the LEDs to a Theater Chase pattern.
+// Expected command would be in the form: "5,0xFFEEDD,0xAA1234,40"
+// cmdMessenger param1: Color 1
+// cmdMessenger param2: Color 2
+// cmdMessenger param3: Interval
+void CMDsetPatternTheater() {
+    boolean ok = false;
+    uint32_t color1;
+    uint32_t color2;
+    uint32_t interval;
+    if (cmdMessenger.available()) {
+        color1 = cmdMessenger.readInt32Arg();
+        if (cmdMessenger.available()) {
+            color2 = cmdMessenger.readInt32Arg();
+            if (cmdMessenger.available()) {
+                interval = cmdMessenger.readInt32Arg();
+                ok = true;
+            }
+        }
+    }
+    if (ok) {
+        Strip.TheaterChase(color1, color2, interval);
+        cmdMessenger.sendCmd(CMDERROR, F("Theater Chase pattern OK."));
+    } else {
+        cmdMessenger.sendCmd(CMDERROR, F("Insufficient Params - Theater Chase needs 3."));
+    }
+}
+
+// Set the LEDs to the color wipe pattern.
+// Expected command would be in the form: "6,0x003304,45"
+// cmdMessenger param1: interval for the pattern to update.
+void CMDsetPatternWipe() {
+    boolean ok = false;
+    uint32_t color;
+    uint32_t interval;
+    if (cmdMessenger.available()) {
+        color = cmdMessenger.readInt32Arg();
+        if (cmdMessenger.available()) {
+            interval = cmdMessenger.readInt32Arg();
+            ok = true;
+        }
+    }
+    if (ok) {
+        Strip.ColorWipe(color, interval);
+        cmdMessenger.sendCmd(CMDERROR, F("Color Wipe pattern OK."));
+    } else {
+        cmdMessenger.sendCmd(CMDERROR, F("Insufficient Params - Color Wipe needs 2."));
+    }
+}
+
+// Set the LEDs to a 'scanner' pattern (think cylon centurion)
+// Expected command would be in the form: "7,0xCABCAB,100"
+// cmdMessenger param1: color to scan
+// cmdMessenger param2: Update interval
+void CMDsetPatternScanner() {
+    boolean ok = false;
+    uint32_t color;
+    uint32_t interval;
+    if (cmdMessenger.available()) {
+        color = cmdMessenger.readInt32Arg();
+        if (cmdMessenger.available()) {
+            interval = cmdMessenger.readInt32Arg();
+            ok = true;
+        }
+    }
+    if (ok) {
+        Strip.Scanner(color, interval);
+        cmdMessenger.sendCmd(CMDERROR, F("Scanner pattern OK."));
+    } else {
+        cmdMessenger.sendCmd(CMDERROR, F("Insufficient Params - Scanner needs 2."));
+    }
+}
+
+// Set the LEDs to a fade pattern
+// Expected command would be in the form: "8,0xFFEEDD,0xCAAABA,10,10"
+// cmdMessenger param1: color 1
+// cmdMessenger param2: color 2
+// cmdMessenger param3: steps between
+// cmdMessenger param4: Update interval
+void CMDsetPatternFade() {
+    boolean ok = false;
+    uint32_t color1;
+    uint32_t color2;
+    uint16_t steps;
+    uint32_t interval;
+    if (cmdMessenger.available()) {
+        color1 = cmdMessenger.readInt32Arg();
+        if (cmdMessenger.available()) {
+            color2 = cmdMessenger.readInt32Arg();
+            if (cmdMessenger.available()) {
+                steps = cmdMessenger.readInt16Arg();
+                if (cmdMessenger.available()) {
+                    interval = cmdMessenger.readInt32Arg();
+                    ok = true;
+                }
+            }
+        }
+    }
+    if (ok) {
+        Strip.Fade(color1, color2, steps, interval);
+        cmdMessenger.sendCmd(CMDERROR, F("Fade pattern OK."));
+    } else {
+        cmdMessenger.sendCmd(CMDERROR, F("Insufficient Params - Fade needs 4."));
+    }
 }
 
 // Use internal NeoPixel library brightness function to globally set a max brightness
@@ -580,112 +665,46 @@ void CMDsetBrightnessAll() {
 	}
 }
 
+// placeholder - host shouldn't be replying on this command.
+void CMDarduinoBusy() {
+	;
+}
+
+// default reply from host if there are no updates - clear out input buffer
+void CMDnoCommand() {
+	while (cmdMessenger.available()) {
+		cmdMessenger.readBinArg<byte>();
+	}
+	UNBLOCKED = true;
+}
+
 // Initialize everything and prepare to start
 void setup() {
-	Serial.begin(115200);
+	Serial.begin(BAUD_RATE);
+
+	// set up the strip
 	Strip.begin();
 
-    // Kick off a pattern
-    // Ring1.TheaterChase(Ring1.Color(255,255,0), Ring1.Color(0,0,50), 100);
-    // Ring2.RainbowCycle(3);
-    // Ring2.Color1 = Ring1.Color1;
-    // Stick.Scanner(Ring1.Color(255,0,0), 55);
-
+    // attach callback command routines
     attachCommandCallbacks();
 
+    // start the rainbow for the default pattern
     Strip.RainbowCycle(3);
 }
 
 // Main loop
 void loop() {
 	// Process incomming serial data, and perform callbacks
-	cmdMessenger.feedinSerialData();
-
-    // Update the LEDs.
-    // Ring1.Update();
-    // Ring2.Update();
-    Strip.Update();
-    
-
-    //ORIGINAL DEMO CODE WITH BUTTONS:
-    // Switch patterns on a button press:
-    // if (digitalRead(8) == LOW) // Button #1 pressed
-    // {
-    //     // Switch Ring1 to FASE pattern
-    //     Ring1.ActivePattern = FADE;
-    //     Ring1.Interval = 20;
-    //     // Speed up the rainbow on Ring2
-    //     Ring2.Interval = 0;
-    //     // Set stick to all red
-    //     Stick.ColorSet(Stick.Color(255, 0, 0));
-    // }
-    // else if (digitalRead(9) == LOW) // Button #2 pressed
-    // {
-    //     // Switch to alternating color wipes on Rings1 and 2
-    //     Ring1.ActivePattern = COLOR_WIPE;
-    //     Ring2.ActivePattern = COLOR_WIPE;
-    //     Ring2.TotalSteps = Ring2.numPixels();
-    //     // And update tbe stick
-    //     Stick.Update();
-    // }
-    // else // Back to normal operation
-    // {
-    //     // Restore all pattern parameters to normal values
-    //     Ring1.ActivePattern = THEATER_CHASE;
-    //     Ring1.Interval = 100;
-    //     Ring2.ActivePattern = RAINBOW_CYCLE;
-    //     Ring2.TotalSteps = 255;
-    //     Ring2.Interval = min(10, Ring2.Interval);
-    //     // And update tbe stick
-    //     Stick.Update();
-    // }    
+    if (UNBLOCKED) {
+    	Strip.Update();
+    } else {
+    	cmdMessenger.feedinSerialData();
+    }
 }
-
-//------------------------------------------------------------
-//Completion Routines - get called on completion of a pattern
-//------------------------------------------------------------
-
-// Ring1 Completion Callback
-// void Ring1Complete()
-// {
-//     if (digitalRead(9) == LOW)  // Button #2 pressed
-//     {
-//         // Alternate color-wipe patterns with Ring2
-//         Ring2.Interval = 40;
-//         Ring1.Color1 = Ring1.Wheel(random(255));
-//         Ring1.Interval = 20000;
-//     }
-//     else  // Retrn to normal
-//     {
-//       Ring1.Reverse();
-//     }
-// }
-
-// Ring 2 Completion Callback
-// void Ring2Complete()
-// {
-//     if (digitalRead(9) == LOW)  // Button #2 pressed
-//     {
-//         // Alternate color-wipe patterns with Ring1
-//         Ring1.Interval = 20;
-//         Ring2.Color1 = Ring2.Wheel(random(255));
-//         Ring2.Interval = 20000;
-//     }
-//     else  // Retrn to normal
-//     {
-//         Ring2.RainbowCycle(random(0,10));
-//     }
-// }
-
-// Stick Completion Callback
-// void StickComplete()
-// {
-//     // Random color change for next scan
-//     Stick.Color1 = Stick.Wheel(random(255));
-// }
 
 // Strip Completion Callback
 void StripComplete() {
-	// do something?
-	;
+	cmdMessenger.sendBinCmd(ARDUINOBUSY,false);
+	Serial.flush();
+	UNBLOCKED = false; // block the update method - waiting for host reply.
 }
