@@ -141,6 +141,7 @@ class NeoPatterns : public Adafruit_DotStar
 
     // doesn't do much; increments for the callback function to eventually execute.
     void StaticPatternUpdate() {
+        show();
         Increment();
     }
     
