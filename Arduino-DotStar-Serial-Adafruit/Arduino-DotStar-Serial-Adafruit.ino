@@ -351,10 +351,7 @@ class NeoPatterns : public Adafruit_DotStar
     }
 };
 
-//Only using one strip of LEDs
-// void Ring1Complete();
-// void Ring2Complete();
-// void StickComplete();
+
 void StripComplete();
 
 // Define Neopatterns and parameters for the dotstar LED strip.
@@ -466,7 +463,7 @@ void CMDsetColorRange() {
         cmdMessenger.readBinArg<byte>();
     }
 	if (startLED != NULL && num != NULL && color != NULL && interval != NULL) {
-		Strip.ColorSet(color, startLED, num);
+		Strip.ColorSet(color, startLED-1, num-1);
         Strip.StaticPattern(interval);
         cmdMessenger.sendBinCmd(CMDCONF, color);
         Serial.flush();
